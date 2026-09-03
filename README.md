@@ -1,4 +1,4 @@
-## Hi there 👋
+![](https://raw.githubusercontent.com/triple-xxx-code/triple-xxx-code/refs/heads/main/1786221012253-019fe311-8e14-729c-809d-e3d3abdee1b5.jpeg)
 
 <!--
 **triple-xxx-code/triple-xxx-code** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
