@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python vs Rust — Интерактивная схема работы</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --border: #334155;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --py: #38bdf8;
+    --py-glow: rgba(56, 189, 248, 0.5);
+    --rs: #f97316;
+    --rs-glow: rgba(249, 115, 22, 0.5);
+    --ok: #22c55e;
+  }
+  * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+  }
+  h1 { margin: 0 0 8px; font-size: 1.5rem; text-align: center; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 20px; text-align: center; }
+  .controls {
+    display: flex; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center;
+  }
+  button {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600;
+    transition: 0.2s;
+  }
+  button:hover { border-color: #64748b; background: #273549; }
+  button.primary { background: #2563eb; border-color: #3b82f6; }
+  .grid {
+    display: grid; grid-template-columns: 1fr; gap: 24px; width: 100%; max-width: 1100px;
+  }
+  .pipeline-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 20px; position: relative;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;
+  }
+  .badge {
+    padding: 4px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 700;
+  }
+  .badge.py { background: rgba(56,189,248,0.15); color: var(--py); border: 1px solid var(--py); }
+  .badge.rs { background: rgba(249,115,22,0.15); color: var(--rs); border: 1px solid var(--rs); }
+  .flow {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; overflow-x: auto; padding: 12px 4px;
+  }
+  .node {
+    flex: 1; min-width: 125px; background: #0f172a; border: 2px solid var(--border);
+    border-radius: 12px; padding: 12px 10px; text-align: center; cursor: pointer;
+    transition: transform 0.25s, border-color 0.25s, box-shadow 0.25s;
+    position: relative;
+  }
+  .node .tag {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); display: block; margin-bottom: 4px;
+  }
+  .node .title { font-weight: 700; font-size: 0.92rem; display: block; }
+  .node .sub { font-size: 0.75rem; color: var(--muted); margin-top: 4px; display: block; }
+  .node.active-py {
+    border-color: var(--py); box-shadow: 0 0 20px var(--py-glow); transform: translateY(-4px);
+  }
+  .node.active-rs {
+    border-color: var(--rs); box-shadow: 0 0 20px var(--rs-glow); transform: translateY(-4px);
+  }
+  .arrow {
+    width: 34px; height: 6px; background: var(--border); border-radius: 4px;
+    position: relative; flex-shrink: 0; overflow: hidden;
+  }
+  .arrow::after {
+    content: ""; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
+    transition: left 0.35s linear;
+  }
+  .arrow.pulse-py::after { background: var(--py); left: 0; box-shadow: 0 0 10px var(--py); }
+  .arrow.pulse-rs::after { background: var(--rs); left: 0; box-shadow: 0 0 10px var(--rs); }
+  .info-box {
+    margin-top: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.7);
+    border-left: 4px solid var(--border); border-radius: 8px; font-size: 0.9rem;
+    line-height: 1.45; min-height: 54px;
+  }
+  .info-box.py { border-left-color: var(--py); }
+  .info-box.rs { border-left-color: var(--rs); }
+</style>
+</head>
+<body>
+
+<h1>Как работают Python и Rust: от кода до процессора</h1>
+<div class="subtitle">Сравнение конвейеров в стиле ByteByteGo • Нажмите на любой блок для деталей</div>
+
+<div class="controls">
+  <button class="primary" id="toggleBtn" onclick="togglePlay()">⏸ Пауза</button>
+  <button onclick="stepForward()">⏭ Следующий шаг</button>
+  <button onclick="changeSpeed()" id="speedBtn">Скорость: 1x</button>
+</div>
+
+<div class="grid">
+  <!-- PYTHON -->
+  <div class="pipeline-card">
+    <div class="header">
+      <strong>🐍 Python (CPython — интерпретация через виртуальную машину)</strong>
+      <span class="badge py">Compile + Runtime VM</span>
+    </div>
+    <div class="flow" id="py-flow"></div>
+    <div class="info-box py" id="py-info"></div>
+  </div>
+
+  <!-- RUST -->
+  <div class="pipeline-card">
+    <div class="header">
+      <strong>🦀 Rust (rustc + LLVM — AOT-компиляция в нативный код)</strong>
+      <span class="badge rs">Ahead-of-Time (No VM)</span>
+    </div>
+    <div class="flow" id="rs-flow"></div>
+    <div class="info-box rs" id="rs-info"></div>
+  </div>
+</div>
+
+<script>
+const pySteps = [
+  { tag: "Файл", title: "Source (.py)", sub: "Исходный код", desc: "1. Вы запускаете скрипт командой python main.py. Исходный текст читается интерпретатором." },
+  { tag: "Frontend", title: "Lexer & Parser", sub: "Токены → AST", desc: "2. Код разбивается на токены и строится абстрактное синтаксическое дерево (AST) с проверкой синтаксиса." },
+  { tag: "Compile", title: "Bytecode (.pyc)", sub: "Промежуточный код", desc: "3. AST компилируется в платформонезависимый байт-код и кэшируется в папке __pycache__." },
+  { tag: "Runtime", title: "PVM (VM)", sub: "Цикл ceval.c", desc: "4. Виртуальная машина Python построчно читает байт-код во время выполнения, проверяет типы на лету и вызывает C-функции." },
+  { tag: "Железо", title: "CPU Execution", sub: "01010101", desc: "5. Инструкции транслируются в машинный код процессора и выдают результат. Для запуска на другом ПК нужен установленный Python." }
+];
+
+const rsSteps = [
+  { tag: "Файл", title: "Source (.rs)", sub: "main.rs + Cargo", desc: "1. Вы запускаете сборку (cargo build). Весь анализ происходит один раз на машине разработчика." },
+  { tag: "Frontend", title: "AST → HIR", sub: "Макросы и типы", desc: "2. Раскрываются макросы (println!), упрощается синтаксический сахар (desugaring) и проверяются все типы данных." },
+  { tag: "Middle-end", title: "MIR + Borrow Check", sub: "Контроль памяти", desc: "3. Ключевой этап Rust: Borrow Checker проверяет владение (ownership) и время жизни ссылок. Сборщик мусора не нужен." },
+  { tag: "Backend", title: "LLVM IR & Linker", sub: "Оптимизация", desc: "4. Бэкенд LLVM глубоко оптимизирует код под архитектуру процессора (x86/ARM), а линковщик собирает единый файл." },
+  { tag: "Железо", title: "Native Binary", sub: "Прямой запуск CPU", desc: "5. Готовый бинарный файл (.exe / ELF) запускается напрямую поверх ОС с максимальной скоростью — без виртуальной машины." }
+];
+
+let step = 0, playing = true, speed = 1600, timer = null;
+
+function renderFlow(containerId, steps, type) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = steps.map((s, i) => `
+    <div class="node" id="${type}-node-${i}" onclick="jumpTo(${i})">
+      <span class="tag">${s.tag}</span>
+      <span class="title">${s.title}</span>
+      <span class="sub">${s.sub}</span>
+    </div>
+    ${i < steps.length - 1 ? `<div class="arrow" id="${type}-arrow-${i}"></div>` : ""}
+  `).join("");
+}
+
+function updateUI() {
+  [ ["py", pySteps], ["rs", rsSteps] ].forEach(([type, steps]) => {
+    steps.forEach((_, i) => {
+      const node = document.getElementById(`${type}-node-${i}`);
+      const arrow = document.getElementById(`${type}-arrow-${i}`);
+      node.classList.toggle(`active-${type}`, i === step);
+      if (arrow) arrow.classList.toggle(`pulse-${type}`, i < step);
+    });
+    document.getElementById(`${type}-info`).textContent = steps[step].desc;
+  });
+}
+
+function startLoop() {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    if (playing) { step = (step + 1) % pySteps.length; updateUI(); }
+  }, speed);
+}
+
+function togglePlay() {
+  playing = !playing;
+  document.getElementById("toggleBtn").textContent = playing ? "⏸ Пауза" : "▶ Старт";
+}
+
+function stepForward() {
+  playing = false;
+  document.getElementById("toggleBtn").textContent = "▶ Старт";
+  step = (step + 1) % pySteps.length;
+  updateUI();
+}
+
+function jumpTo(i) {
+  playing = false;
+  document.getElementById("toggleBtn").textContent = "▶ Старт";
+  step = i;
+  updateUI();
+}
+
+function changeSpeed() {
+  speed = speed === 1600 ? 800 : speed === 800 ? 2600 : 1600;
+  const label = speed === 800 ? "2x" : speed === 2600 ? "0.5x" : "1x";
+  document.getElementById("speedBtn").textContent = `Скорость: ${label}`;
+  startLoop();
+}
+
+renderFlow("py-flow", pySteps, "py");
+renderFlow("rs-flow", rsSteps, "rs");
+updateUI();
+startLoop();
+</script>
+</body>
+</html>
