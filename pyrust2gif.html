@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Python vs Rust — вертикальная схема + GIF/WebM</title>
+<style>
+  :root{--bg:#060608;--glass:rgba(18,14,12,.72);--border:rgba(249,115,22,.24);
+        --text:#f8fafc;--muted:#a8a29e;--orange:#f97316;--orange-l:#fb923c;--amber:#f59e0b}
+  *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif}
+  body{margin:0;padding:22px 12px 44px;color:var(--text);background:var(--bg);
+       display:flex;flex-direction:column;align-items:center;min-height:100vh;
+       background-image:radial-gradient(circle at 20% 8%,rgba(249,115,22,.18),transparent 45%),
+                        radial-gradient(circle at 85% 92%,rgba(234,88,12,.15),transparent 45%)}
+  h1{margin:0 0 4px;font-size:clamp(1.05rem,4.2vw,1.5rem);font-weight:800;text-align:center;color:#fff}
+  .subtitle{color:var(--muted);font-size:.82rem;margin-bottom:16px;text-align:center}
+  .controls{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;justify-content:center;max-width:580px}
+  button,select{background:var(--glass);color:var(--text);border:1px solid var(--border);
+    padding:9px 14px;border-radius:10px;cursor:pointer;font-weight:700;font-size:.84rem;transition:.18s}
+  button:hover{border-color:var(--orange);background:rgba(249,115,22,.14)}
+  button.primary{background:linear-gradient(135deg,#ea580c,#f97316);border-color:var(--orange-l);color:#fff}
+  button:disabled{opacity:.45;cursor:progress}
+  #stage{width:100%;max-width:560px;border-radius:18px;overflow:hidden;
+         border:1px solid rgba(249,115,22,.2);box-shadow:0 22px 55px rgba(0,0,0,.75)}
+  canvas{display:block;touch-action:manipulation}
+  #status{margin-top:12px;font-size:.84rem;font-weight:600;color:var(--orange-l);min-height:20px;text-align:center}
+  #bar{width:min(420px,92vw);height:6px;background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden;margin-top:8px;display:none}
+  #bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ea580c,#fbbf24);transition:width .12s}
+  #result{display:none;margin-top:16px;text-align:center;max-width:min(560px,94vw)}
+  #result img,#result video{max-width:100%;border-radius:12px;border:1px solid var(--border)}
+  #result a{display:inline-block;margin-top:10px;color:#fff;background:linear-gradient(135deg,#ea580c,#f97316);
+            padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:800;font-size:.86rem}
+  .hint{color:var(--muted);font-size:.76rem;margin-top:12px;text-align:center;max-width:560px;line-height:1.55}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+</style>
+</head>
+<body>
+
+<h1>Python vs Rust: от кода до процессора</h1>
+<div class="subtitle">Вертикальный таймлайн • нажми на шаг • экспорт офлайн</div>
+
+<div class="controls">
+  <button id="toggleBtn">⏸ Пауза</button>
+  <button id="stepBtn">⏭ Шаг</button>
+  <button id="speedBtn">Скорость: 1x</button>
+  <select id="sizeSel">
+    <option value="540">540px — быстро</option>
+    <option value="720" selected>720px — стандарт</option>
+    <option value="1080">1080px — чётко</option>
+  </select>
+  <button class="primary" id="gifBtn">📥 GIF</button>
+  <button id="webmBtn">🎬 WebM</button>
+  <button id="pngBtn">🖼 PNG</button>
+  <button id="cancelBtn" style="display:none">✖ Отмена</button>
+</div>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="status"></div>
+<div id="bar"><i></i></div>
+<div id="result"></div>
+<p class="hint">iPhone/iPad: если файл не скачался сам — под схемой появится предпросмотр,
+долгое нажатие → «Сохранить изображение». WebM — Chrome/Firefox; в Safari используй GIF.
+На телефоне выбирай 540–720px: 1080px требует ~100 МБ памяти при кодировании.</p>
+<div class="sr-only" id="live" aria-live="polite"></div>
+
+<script>
+"use strict";
+/* ============================ ДАННЫЕ ============================ */
+const pySteps=[
+ {tag:"Файл",     title:"Source (.py)",      sub:"Исходный код",      desc:"1. Запуск скрипта (python main.py). Исходный текст передаётся интерпретатору."},
+ {tag:"Frontend", title:"Lexer & Parser",    sub:"Токены → AST",      desc:"2. Разбиение на токены и построение абстрактного синтаксического дерева (AST)."},
+ {tag:"Compile",  title:"Bytecode (.pyc)",   sub:"Промежуточный код", desc:"3. Компиляция AST в платформонезависимый байт-код (__pycache__/*.pyc)."},
+ {tag:"Runtime",  title:"PVM (VM)",          sub:"Цикл ceval.c",      desc:"4. Виртуальная машина читает байт-код во время запуска и проверяет типы на лету."},
+ {tag:"Железо",   title:"CPU Execution",     sub:"01010101",          desc:"5. Трансляция в машинный код процессора. Требуется установленный Python."}
+];
+const rsSteps=[
+ {tag:"Файл",      title:"Source (.rs)",       sub:"main.rs + Cargo",   desc:"1. Сборка (cargo build). Весь тяжёлый анализ выполняется до запуска программы."},
+ {tag:"Frontend",  title:"AST → HIR",          sub:"Макросы и типы",    desc:"2. Раскрытие макросов (println!), упрощение синтаксиса и строгая проверка типов."},
+ {tag:"Middle-end",title:"MIR + Borrow Check", sub:"Контроль памяти",   desc:"3. Borrow Checker проверяет владение и время жизни ссылок. Сборщик мусора не нужен."},
+ {tag:"Backend",   title:"LLVM IR & Linker",   sub:"Оптимизация",       desc:"4. LLVM генерирует оптимизированный код под CPU, линковщик собирает единый файл."},
+ {tag:"Железо",    title:"Native Binary",      sub:"Прямой запуск CPU", desc:"5. Готовый бинарник (.exe / ELF) работает напрямую поверх ОС без прослойки."}
+];
+const N=pySteps.length, LW=720;
+const FONT="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif";
+
+/* ============================ ГЕОМЕТРИЯ (одна на все режимы) ============================ */
+function metrics(){
+  const pad=22, cardW=LW-pad*2, ip=18, innerW=cardW-ip*2;
+  const nodeH=66, nodeGap=26, headH=78, infoGap=14, infoH=92, padBottom=16;
+  const flowH=N*nodeH+(N-1)*nodeGap;
+  const cardH=headH+flowH+infoGap+infoH+padBottom;
+  const titleH=116, cardGap=20, footerH=36;
+  return {pad,cardW,ip,innerW,nodeH,nodeGap,headH,infoGap,infoH,flowH,cardH,
+          titleH,cardGap,footerH,H:titleH+cardH*2+cardGap+footerH};
+}
+const M=metrics();
+
+/* ============================ ПРИМИТИВЫ ============================ */
+function rr(c,x,y,w,h,r){
+  r=Math.min(r,w/2,h/2);
+  c.beginPath(); c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);     c.arcTo(x,y,x+w,y,r); c.closePath();
+}
+function rgba(a,al){return "rgba("+a[0]+","+a[1]+","+a[2]+","+al+")";}
+function fitFont(c,t,maxW,base,weight,min){
+  let s=base; c.font=weight+" "+s+"px "+FONT;
+  while(s>min && c.measureText(t).width>maxW){ s-=0.5; c.font=weight+" "+s+"px "+FONT; }
+  return s;
+}
+function wrap(c,t,maxW){
+  const words=String(t).split(/\s+/), lines=[]; let cur="";
+  for(const w of words){ const x=cur?cur+" "+w:w;
+    if(c.measureText(x).width>maxW && cur){lines.push(cur);cur=w;} else cur=x; }
+  if(cur)lines.push(cur); return lines;
+}
+
+/* ============================ СЦЕНА ============================ */
+const CARDS=[
+ {steps:pySteps,name:"🐍  Python (CPython)",badge:"Compile + Runtime VM",
+  rgb:[245,158,11],badgeCol:"#fbbf24"},
+ {steps:rsSteps,name:"🦀  Rust (rustc + LLVM)",badge:"Ahead-of-Time • No VM",
+  rgb:[249,115,22],badgeCol:"#fb923c"}
+];
+
+function drawScene(c,s,px){
+  px=px||1;
+  const W=LW,H=M.H;
+  c.save(); c.textBaseline="middle"; c.textAlign="left";
+  c.fillStyle="#060608"; c.fillRect(0,0,W,H);
+  let g=c.createRadialGradient(W*.16,H*.05,0,W*.16,H*.05,W*.95);
+  g.addColorStop(0,"rgba(249,115,22,.20)"); g.addColorStop(1,"rgba(249,115,22,0)");
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  g=c.createRadialGradient(W*.92,H*.96,0,W*.92,H*.96,W*.95);
+  g.addColorStop(0,"rgba(234,88,12,.16)"); g.addColorStop(1,"rgba(234,88,12,0)");
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+
+  /* заголовок — сплошная заливка, без градиентов по тексту */
+  c.textAlign="center";
+  c.font="800 34px "+FONT; c.fillStyle="#ffffff"; c.fillText("Python vs Rust",W/2,42);
+  c.font="800 23px "+FONT; c.fillStyle="#fb923c"; c.fillText("от кода до процессора",W/2,74);
+  c.font="600 13.5px "+FONT; c.fillStyle="#a8a29e";
+  c.fillText("CPython: байт-код + VM   •   Rust: AOT-компиляция",W/2,99);
+
+  const hits=[];
+  CARDS.forEach((card,ci)=>{
+    const x=M.pad, y=M.titleH+ci*(M.cardH+M.cardGap), A=card.rgb;
+    rr(c,x,y,M.cardW,M.cardH,18);
+    c.fillStyle="rgba(18,14,12,.80)"; c.fill();
+    c.lineWidth=1.4; c.strokeStyle="rgba(249,115,22,.26)"; c.stroke();
+
+    c.textAlign="left";
+    c.font="800 21px "+FONT; c.fillStyle="#ffffff"; c.fillText(card.name,x+M.ip,y+30);
+    c.font="700 12px "+FONT;
+    const bw=c.measureText(card.badge).width+22;
+    rr(c,x+M.ip,y+44,bw,24,12);
+    c.fillStyle=rgba(A,.14); c.fill();
+    c.lineWidth=1.2; c.strokeStyle=rgba(A,.5); c.stroke();
+    c.fillStyle=card.badgeCol; c.fillText(card.badge,x+M.ip+11,y+56.5);
+
+    const nx=x+M.ip, nw=M.innerW, cx=nx+26;
+    for(let i=0;i<N;i++){
+      const ny=y+M.headH+i*(M.nodeH+M.nodeGap), on=i===s, done=i<s;
+      hits.push({x:nx,y:ny,w:nw,h:M.nodeH,i});
+
+      /* вертикальная стрелка сверху */
+      if(i>0){
+        const ay=ny-M.nodeGap;
+        c.fillStyle = i<=s ? rgba(A,.95) : "rgba(255,255,255,.13)";
+        c.fillRect(cx-1.5,ay+3,3,M.nodeGap-12);
+        c.beginPath(); c.moveTo(cx-6,ay+M.nodeGap-10);
+        c.lineTo(cx+6,ay+M.nodeGap-10); c.lineTo(cx,ay+M.nodeGap-2);
+        c.closePath(); c.fill();
+      }
+
+      /* свечение отдельным проходом, чтобы не двоить заливку */
+      if(on){
+        c.save(); c.shadowColor=rgba(A,.6); c.shadowBlur=20*px;
+        rr(c,nx,ny,nw,M.nodeH,12);
+        c.lineWidth=2; c.strokeStyle=rgba(A,.9); c.stroke(); c.restore();
+      }
+      rr(c,nx,ny,nw,M.nodeH,12);
+      c.fillStyle = on ? rgba(A,.22) : "rgba(12,10,9,.94)"; c.fill();
+      c.lineWidth = on?2:1.3;
+      c.strokeStyle = on ? rgba(A,1) : done ? rgba(A,.45) : "rgba(255,255,255,.10)";
+      c.stroke();
+
+      /* номер шага */
+      const cy=ny+M.nodeH/2;
+      c.beginPath(); c.arc(cx,cy,16,0,Math.PI*2);
+      if(on){ c.fillStyle=rgba(A,1); c.fill(); }
+      else{ c.fillStyle="rgba(0,0,0,.55)"; c.fill();
+            c.lineWidth=1.6; c.strokeStyle=done?rgba(A,.75):"rgba(255,255,255,.18)"; c.stroke(); }
+      c.textAlign="center"; c.font="800 16px "+FONT;
+      c.fillStyle = on ? "#0a0807" : done ? rgba(A,1) : "#8b8580";
+      c.fillText(String(i+1),cx,cy+.5);
+
+      /* тексты: три разнесённые строки, никаких наложений */
+      const tag=card.steps[i].tag.toUpperCase();
+      c.font="700 11px "+FONT;
+      const tw=c.measureText(tag).width+18, tx=nx+nw-14-tw, textX=nx+56;
+      c.textAlign="left";
+      fitFont(c,card.steps[i].title,nw-56-tw-26,19,"800",13);
+      c.fillStyle="#ffffff"; c.fillText(card.steps[i].title,textX,ny+27);
+      fitFont(c,card.steps[i].sub,nw-56-22,14,"600",10);
+      c.fillStyle= on ? "#eceae8" : "#a8a29e";
+      c.fillText(card.steps[i].sub,textX,ny+48);
+      rr(c,tx,ny+13,tw,20,10);
+      c.fillStyle="rgba(255,255,255,.055)"; c.fill();
+      c.font="700 11px "+FONT; c.textAlign="center";
+      c.fillStyle= on ? rgba(A,1) : "#8b8580";
+      c.fillText(tag,tx+tw/2,ny+23.5);
+    }
+
+    /* описание шага */
+    const iy=y+M.headH+M.flowH+M.infoGap, ix=x+M.ip, iw=M.innerW;
+    rr(c,ix,iy,iw,M.infoH,10); c.fillStyle="rgba(0,0,0,.62)"; c.fill();
+    rr(c,ix,iy,4,M.infoH,2);   c.fillStyle=rgba(A,1); c.fill();
+    c.textAlign="left"; c.textBaseline="top";
+    let fs=15,lines;
+    for(;;){ c.font="600 "+fs+"px "+FONT;
+      lines=wrap(c,card.steps[s].desc,iw-32);
+      if(lines.length<=3||fs<=12) break; fs-=0.5; }
+    c.fillStyle="#ededeb";
+    lines.slice(0,3).forEach((ln,j)=>c.fillText(ln,ix+17,iy+14+j*22));
+    c.textBaseline="middle";
+  });
+
+  /* индикатор шагов */
+  const fy=H-M.footerH/2, dw=34, dg=10, total=N*dw+(N-1)*dg;
+  for(let i=0;i<N;i++){
+    rr(c,W/2-total/2+i*(dw+dg),fy-3.5,dw,7,3.5);
+    c.fillStyle = i<=s ? "#f97316" : "rgba(255,255,255,.12)"; c.fill();
+  }
+  c.restore();
+  return hits;
+}
+
+/* ============================ ЭКРАН / ПЛЕЕР ============================ */
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d"), $=id=>document.getElementById(id);
+let step=0, playing=true, speedIdx=0, hits=[], exporting=false, cancelled=false, cancelSend=null;
+const SPEEDS=[{ms:1500,label:"1x"},{ms:750,label:"2x"},{ms:2500,label:"0.5x"}];
+let lastTick=performance.now();
+
+function resize(){
+  const cssW=Math.min($("stage").clientWidth||360,560);
+  const dpr=Math.min(window.devicePixelRatio||1,2), k=cssW*dpr/LW;
+  cv.width=Math.round(LW*k); cv.height=Math.round(M.H*k);
+  cv.style.width=cssW+"px"; cv.style.height=(cssW*M.H/LW)+"px";
+  ctx.setTransform(k,0,0,k,0,0);
+  hits=drawScene(ctx,step,k);
+}
+function paint(){ hits=drawScene(ctx,step,cv.width/LW); $("live").textContent=pySteps[step].title; }
+function pause(){ playing=false; $("toggleBtn").textContent="▶ Старт"; }
+
+window.addEventListener("resize",()=>{clearTimeout(window.__rz);window.__rz=setTimeout(resize,120);});
+cv.addEventListener("click",e=>{
+  if(exporting)return;
+  const r=cv.getBoundingClientRect(), k=LW/r.width;
+  const mx=(e.clientX-r.left)*k, my=(e.clientY-r.top)*k;
+  const h=hits.find(o=>mx>=o.x&&mx<=o.x+o.w&&my>=o.y&&my<=o.y+o.h);
+  if(h){ pause(); step=h.i; paint(); }
+});
+$("toggleBtn").onclick=()=>{ playing=!playing; lastTick=performance.now();
+  $("toggleBtn").textContent=playing?"⏸ Пауза":"▶ Старт"; };
+$("stepBtn").onclick=()=>{ pause(); step=(step+1)%N; paint(); };
+$("speedBtn").onclick=()=>{ speedIdx=(speedIdx+1)%SPEEDS.length;
+  $("speedBtn").textContent="Скорость: "+SPEEDS[speedIdx].label; lastTick=performance.now(); };
+document.addEventListener("visibilitychange",()=>{lastTick=performance.now();});
+(function loop(now){
+  if(playing&&!exporting&&now-lastTick>=SPEEDS[speedIdx].ms){ lastTick=now; step=(step+1)%N; paint(); }
+  requestAnimationFrame(loop);
+})(performance.now());
+
+/* ============================ GIF-ЭНКОДЕР ============================ */
+const ENC_SRC=`
+"use strict";
+let cancelled=false;
+function Bytes(){this.a=new Uint8Array(1<<16);this.n=0;}
+Bytes.prototype.ensure=function(k){ if(this.n+k<=this.a.length)return;
+  let cap=this.a.length; while(cap<this.n+k)cap*=2;
+  const b=new Uint8Array(cap); b.set(this.a.subarray(0,this.n)); this.a=b; };
+Bytes.prototype.b=function(v){this.ensure(1);this.a[this.n++]=v&255;};
+Bytes.prototype.u16=function(v){this.b(v);this.b(v>>8);};
+Bytes.prototype.s=function(t){this.ensure(t.length);for(let i=0;i<t.length;i++)this.a[this.n++]=t.charCodeAt(i)&255;};
+Bytes.prototype.arr=function(x){this.ensure(x.length);this.a.set(x,this.n);this.n+=x.length;};
+Bytes.prototype.out=function(){return this.a.subarray(0,this.n);};
+
+const KEY=[[255,255,255],[6,6,8],[249,115,22],[245,158,11],[251,146,60],[168,162,158]];
+
+function buildPalette(frames){
+  const hist=new Uint32Array(32768);
+  for(let f=0;f<frames.length;f++){
+    const d=new Uint8Array(frames[f]);
+    for(let j=0;j<d.length;j+=12) hist[((d[j]>>3)<<10)|((d[j+1]>>3)<<5)|(d[j+2]>>3)]++;
+  }
+  const keys=[]; for(let k=0;k<32768;k++) if(hist[k]) keys.push(k);
+  const target=256-KEY.length;
+  function stats(box){
+    let rn=31,rx=0,gn=31,gx=0,bn=31,bx=0,t=0;
+    for(let i=0;i<box.length;i++){ const k=box[i],r=(k>>10)&31,g=(k>>5)&31,b=k&31;
+      if(r<rn)rn=r; if(r>rx)rx=r; if(g<gn)gn=g; if(g>gx)gx=g; if(b<bn)bn=b; if(b>bx)bx=b; t+=hist[k]; }
+    return {rn:rn,rx:rx,gn:gn,gx:gx,bn:bn,bx:bx,t:t};
+  }
+  let boxes=keys.length?[keys]:[];
+  while(boxes.length<target){
+    let bi=-1,best=-1,bs=null;
+    for(let i=0;i<boxes.length;i++){
+      if(boxes[i].length<2) continue;
+      const s=stats(boxes[i]);
+      const range=Math.max(s.rx-s.rn,s.gx-s.gn,s.bx-s.bn);
+      if(range<=0) continue;
+      const score=(range+1)*Math.log(1+s.t);
+      if(score>best){best=score;bi=i;bs=s;}
+    }
+    if(bi<0) break;
+    const box=boxes[bi], dr=bs.rx-bs.rn, dg=bs.gx-bs.gn, db=bs.bx-bs.bn;
+    const shift=(dr>=dg&&dr>=db)?10:(dg>=db?5:0);
+    box.sort(function(a,b){return ((a>>shift)&31)-((b>>shift)&31);});
+    let acc=0,cut=1;
+    for(let i=0;i<box.length;i++){ acc+=hist[box[i]];
+      if(acc>=bs.t/2){ cut=Math.max(1,Math.min(box.length-1,i+1)); break; } }
+    boxes.splice(bi,1,box.slice(0,cut),box.slice(cut));
+  }
+  const pal=new Uint8Array(768); let n=0;
+  for(let i=0;i<boxes.length;i++){
+    const box=boxes[i]; let r=0,g=0,b=0,c=0;
+    for(let j=0;j<box.length;j++){ const k=box[j],w=hist[k];
+      r+=((k>>10)&31)*w; g+=((k>>5)&31)*w; b+=(k&31)*w; c+=w; }
+    if(!c)c=1;
+    pal[n*3]=Math.min(255,Math.round(r/c*255/31));
+    pal[n*3+1]=Math.min(255,Math.round(g/c*255/31));
+    pal[n*3+2]=Math.min(255,Math.round(b/c*255/31)); n++;
+  }
+  for(let i=0;i<KEY.length;i++){ pal[n*3]=KEY[i][0];pal[n*3+1]=KEY[i][1];pal[n*3+2]=KEY[i][2];n++; }
+  while(n<256){ pal[n*3]=pal[(n-1)*3];pal[n*3+1]=pal[(n-1)*3+1];pal[n*3+2]=pal[(n-1)*3+2];n++; }
+  return pal;
+}
+function makeMapper(pal){
+  const cache=new Int16Array(32768).fill(-1);
+  return function(d,out){
+    for(let i=0,j=0;i<out.length;i++,j+=4){
+      const key=((d[j]>>3)<<10)|((d[j+1]>>3)<<5)|(d[j+2]>>3);
+      let idx=cache[key];
+      if(idx<0){
+        const R=((key>>10)&31)*255/31,G=((key>>5)&31)*255/31,B=(key&31)*255/31;
+        let bd=Infinity,bi=0;
+        for(let p=0;p<256;p++){
+          const dr=R-pal[p*3],dg=G-pal[p*3+1],db=B-pal[p*3+2];
+          const dist=dr*dr*2+dg*dg*4+db*db*3;
+          if(dist<bd){bd=dist;bi=p;}
+        }
+        cache[key]=idx=bi;
+      }
+      out[i]=idx;
+    }
+  };
+}
+function lzw(idx,minCodeSize){
+  const clear=1<<minCodeSize,eoi=clear+1,out=new Bytes();
+  let acc=0,bits=0,size=minCodeSize+1,dict=new Map(),next=eoi+1;
+  function emit(code){ acc|=code<<bits; bits+=size;
+    while(bits>=8){ out.b(acc); acc>>>=8; bits-=8; } }
+  emit(clear);
+  let prefix=idx[0];
+  for(let i=1;i<idx.length;i++){
+    const k=idx[i],key=(prefix<<8)|k,hit=dict.get(key);
+    if(hit!==undefined){ prefix=hit; continue; }
+    emit(prefix);
+    if(next<4096){ dict.set(key,next++); if(next===(1<<size)&&size<12) size++; }
+    else { emit(clear); dict=new Map(); next=eoi+1; size=minCodeSize+1; }
+    prefix=k;
+  }
+  emit(prefix); emit(eoi);
+  if(bits>0) out.b(acc);
+  return out.out();
+}
+function subBlocks(out,data){
+  for(let i=0;i<data.length;i+=255){ const n=Math.min(255,data.length-i);
+    out.b(n); out.arr(data.subarray(i,i+n)); }
+  out.b(0);
+}
+function run(m){
+  self.postMessage({progress:0});
+  const w=m.w,h=m.h,frames=m.frames,delay=m.delayCs;
+  const pal=buildPalette(frames),map=makeMapper(pal),out=new Bytes();
+  out.s("GIF89a"); out.u16(w); out.u16(h); out.b(0xF7); out.b(0); out.b(0); out.arr(pal);
+  out.b(0x21); out.b(0xFF); out.b(11); out.s("NETSCAPE2.0"); out.b(3); out.b(1); out.u16(0); out.b(0);
+  const idx=new Uint8Array(w*h); let f=0;
+  (function nextFrame(){
+    try{
+      if(cancelled){ self.postMessage({cancelled:true}); return; }
+      if(f>=frames.length){ out.b(0x3B);
+        const buf=out.out().slice().buffer; self.postMessage({done:buf},[buf]); return; }
+      map(new Uint8Array(frames[f]),idx);
+      out.b(0x21); out.b(0xF9); out.b(4); out.b(0x04); out.u16(delay); out.b(0); out.b(0);
+      out.b(0x2C); out.u16(0); out.u16(0); out.u16(w); out.u16(h); out.b(0);
+      out.b(8); subBlocks(out,lzw(idx,8));
+      f++; self.postMessage({progress:f/frames.length});
+      setTimeout(nextFrame,0);
+    }catch(err){ self.postMessage({error:String(err&&err.message||err)}); }
+  })();
+}
+self.onmessage=function(e){
+  const m=e.data;
+  if(m.cmd==="cancel"){ cancelled=true; return; }
+  if(m.cmd==="start"){ cancelled=false;
+    try{ run(m); }catch(err){ self.postMessage({error:String(err&&err.message||err)}); } }
+};
+`;
+
+function encodeInWorker(data,onProgress){
+  return new Promise((resolve,reject)=>{
+    let url=null,worker=null,timer=null;
+    const cleanup=()=>{clearTimeout(timer);if(worker)worker.terminate();if(url)URL.revokeObjectURL(url);};
+    try{
+      url=URL.createObjectURL(new Blob([ENC_SRC],{type:"text/javascript"}));
+      worker=new Worker(url);
+    }catch(e){ reject(new Error("no-worker")); return; }
+    timer=setTimeout(()=>{cleanup();reject(new Error("worker-timeout"));},5000);
+    worker.onerror=e=>{ if(e.preventDefault)e.preventDefault(); cleanup(); reject(new Error("worker-error")); };
+    worker.onmessage=e=>{
+      const m=e.data;
+      if(m.progress!=null){ clearTimeout(timer); onProgress(m.progress); return; }
+      cleanup();
+      if(m.done) resolve(new Blob([m.done],{type:"image/gif"}));
+      else if(m.cancelled) reject(new Error("cancel"));
+      else reject(new Error(m.error||"encode-failed"));
+    };
+    cancelSend=()=>{ try{worker.postMessage({cmd:"cancel"});}catch(_){}};
+    worker.postMessage(data,data.frames);   // zero-copy передача кадров
+  });
+}
+function encodeInMain(data,onProgress){
+  return new Promise((resolve,reject)=>{
+    const shim={onmessage:null,postMessage:m=>{
+      if(m.progress!=null){onProgress(m.progress);return;}
+      if(m.done) resolve(new Blob([m.done],{type:"image/gif"}));
+      else if(m.cancelled) reject(new Error("cancel"));
+      else reject(new Error(m.error||"encode-failed"));
+    }};
+    try{ new Function("self",ENC_SRC)(shim); }catch(e){ reject(e); return; }
+    cancelSend=()=>shim.onmessage({data:{cmd:"cancel"}});
+    shim.onmessage({data});
+  });
+}
+async function buildGIF(width,holdMs,onProgress){
+  let data=grabFrames(width,holdMs);
+  try{ return await encodeInWorker(data,onProgress); }
+  catch(e){
+    if(cancelled||e.message==="cancel") throw e;
+    data=grabFrames(width,holdMs);          // буферы были переданы воркеру — рендерим заново
+    return await encodeInMain(data,onProgress);
+  }
+}
+
+/* ============================ ЗАХВАТ / СОХРАНЕНИЕ ============================ */
+function grabFrames(width,holdMs){
+  const k=width/LW, h=Math.round(M.H*k);
+  const off=document.createElement("canvas"); off.width=width; off.height=h;
+  const oc=off.getContext("2d",{willReadFrequently:true});
+  const frames=[];
+  for(let i=0;i<N;i++){
+    oc.setTransform(k,0,0,k,0,0); drawScene(oc,i,k);
+    frames.push(oc.getImageData(0,0,width,h).data.buffer);
+  }
+  return {cmd:"start",frames,w:width,h,delayCs:Math.max(20,Math.round(holdMs/10))};
+}
+function setBusy(on,label){
+  exporting=on; if(on)cancelled=false; cancelSend=null;
+  ["gifBtn","webmBtn","pngBtn","sizeSel","toggleBtn","stepBtn","speedBtn"].forEach(id=>$(id).disabled=on);
+  $("cancelBtn").style.display=on?"":"none";
+  $("bar").style.display=on?"block":"none";
+  $("bar").firstElementChild.style.width="0%";
+  $("status").textContent=label||"";
+  if(on)$("result").style.display="none";
+}
+function progress(p,text){ $("bar").firstElementChild.style.width=Math.round(p*100)+"%";
+  if(text)$("status").textContent=text; }
+$("cancelBtn").onclick=()=>{ cancelled=true; if(cancelSend)cancelSend(); $("status").textContent="Отменено"; };
+
+function saveBlob(blob,name){
+  const url=URL.createObjectURL(url_safe(blob));
+  function url_safe(b){return b;}
+  const a=document.createElement("a");
+  a.href=url; a.download=name; a.rel="noopener"; a.style.display="none";
+  document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),1000);
+  const box=$("result"); box.innerHTML=""; box.style.display="block";
+  if(blob.type.indexOf("video")===0){
+    const v=document.createElement("video"); v.src=url; v.controls=true; v.playsInline=true; v.loop=true; box.appendChild(v);
+  }else{
+    const img=document.createElement("img"); img.src=url; img.alt=name; box.appendChild(img);
+  }
+  const link=document.createElement("a"); link.href=url; link.download=name;
+  link.textContent="⬇ Сохранить "+name; box.appendChild(link);
+  const p=document.createElement("p"); p.className="hint";
+  p.textContent="Не скачалось? Долгое нажатие на изображение → «Сохранить изображение» (iOS) или ссылка выше.";
+  box.appendChild(p);
+  setTimeout(()=>URL.revokeObjectURL(url),600000);
+}
+
+async function exportGIF(){
+  const wasPlaying=playing; pause();
+  const width=parseInt($("sizeSel").value,10);
+  setBusy(true,"⏳ Рендер кадров…");
+  try{
+    await new Promise(r=>setTimeout(r,40));
+    const hold=SPEEDS[speedIdx].ms;
+    progress(0,"⚙️ Кодирование GIF…");
+    const blob=await buildGIF(width,hold,p=>{
+      if(cancelled)throw new Error("cancel");
+      progress(p*.97,"⚙️ Кодирование GIF… "+Math.round(p*100)+"%");
+    });
+    if(cancelled)throw new Error("cancel");
+    progress(1,"✅ GIF готов: "+(blob.size/1048576).toFixed(2)+" МБ");
+    saveBlob(blob,"python_vs_rust.gif");
+  }catch(e){
+    if(e.message!=="cancel") $("status").textContent="❌ Ошибка GIF: "+e.message;
+  }finally{
+    const msg=$("status").textContent;
+    setBusy(false,msg); $("bar").style.display="none";
+    if(wasPlaying){playing=true;$("toggleBtn").textContent="⏸ Пауза";lastTick=performance.now();}
+    paint();
+  }
+}
+
+async function exportWebM(){
+  const mime=["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"]
+    .find(m=>{try{return MediaRecorder.isTypeSupported(m);}catch(_){return false;}});
+  if(!mime||!HTMLCanvasElement.prototype.captureStream){
+    $("status").textContent="WebM недоступен в этом браузере — используй GIF."; return; }
+  const wasPlaying=playing; pause(); setBusy(true,"🎬 Запись WebM…");
+  const width=parseInt($("sizeSel").value,10), k=width/LW, h=Math.round(M.H*k);
+  const off=document.createElement("canvas"); off.width=width; off.height=h;
+  const oc=off.getContext("2d");
+  const stream=off.captureStream(30);
+  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8000000});
+  const chunks=[]; rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  const stopped=new Promise(r=>rec.onstop=r);
+  rec.start();
+  const hold=SPEEDS[speedIdx].ms;
+  try{
+    for(let i=0;i<N&&!cancelled;i++){
+      const t0=performance.now();
+      while(performance.now()-t0<hold&&!cancelled){
+        oc.setTransform(k,0,0,k,0,0); drawScene(oc,i,k);
+        progress((i+(performance.now()-t0)/hold)/N,"🎬 Запись… кадр "+(i+1)+"/"+N);
+        await new Promise(r=>requestAnimationFrame(r));
+      }
+    }
+    rec.stop(); await stopped;
+    if(!cancelled){
+      const blob=new Blob(chunks,{type:"video/webm"});
+      progress(1,"✅ WebM готов: "+(blob.size/1048576).toFixed(2)+" МБ");
+      saveBlob(blob,"python_vs_rust.webm");
+    }
+  }catch(e){ $("status").textContent="❌ Ошибка WebM: "+e.message; }
+  finally{
+    stream.getTracks().forEach(t=>t.stop());
+    const msg=$("status").textContent;
+    setBusy(false,msg); $("bar").style.display="none";
+    if(wasPlaying){playing=true;$("toggleBtn").textContent="⏸ Пауза";lastTick=performance.now();}
+    paint();
+  }
+}
+
+function exportPNG(){
+  const width=parseInt($("sizeSel").value,10), k=width/LW;
+  const off=document.createElement("canvas"); off.width=width; off.height=Math.round(M.H*k);
+  const oc=off.getContext("2d"); oc.setTransform(k,0,0,k,0,0); drawScene(oc,step,k);
+  off.toBlob(b=>{ if(b)saveBlob(b,"python_vs_rust_step"+(step+1)+".png");
+    else $("status").textContent="❌ PNG недоступен"; },"image/png");
+}
+
+$("gifBtn").onclick=exportGIF;
+$("webmBtn").onclick=exportWebM;
+$("pngBtn").onclick=exportPNG;
+if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream||
+   !["video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"].some(m=>{try{return MediaRecorder.isTypeSupported(m);}catch(_){return false;}})){
+  $("webmBtn").disabled=true; $("webmBtn").title="Не поддерживается этим браузером";
+}
+resize();
+</script>
+</body>
+</html>
